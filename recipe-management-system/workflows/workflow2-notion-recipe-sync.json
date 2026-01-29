@@ -1,0 +1,247 @@
+{
+  "name": "Notion Recipe Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 5,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Recipes"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "id": "sheets-trigger",
+      "name": "Google Sheets Trigger",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "filter-new",
+              "leftValue": "={{ $json.Status }}",
+              "rightValue": "New",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "filter-new-rows",
+      "name": "Filter New Rows",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.NOTION_RECIPES_DB_ID }}"
+        },
+        "properties": {
+          "property": [
+            {
+              "key": "Title|title",
+              "title": "={{ $json.Title }}"
+            },
+            {
+              "key": "Description|rich_text",
+              "richText": "={{ $json.Description }}"
+            },
+            {
+              "key": "Ingredients|rich_text",
+              "richText": "={{ $json.Ingredients }}"
+            },
+            {
+              "key": "Instructions|rich_text",
+              "richText": "={{ $json.Instructions }}"
+            },
+            {
+              "key": "In Weekly Meals|checkbox",
+              "checkboxValue": false
+            },
+            {
+              "key": "Date Added|date",
+              "date": "={{ $now.toISO() }}"
+            },
+            {
+              "key": "Cooking Notes|rich_text",
+              "richText": ""
+            },
+            {
+              "key": "Version History|rich_text",
+              "richText": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-notion-page",
+      "name": "Create Notion Recipe",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [680, 240],
+      "credentials": {
+        "notionApi": {
+          "id": "NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Determine the row number for updating status\n// The Google Sheets Trigger provides the row data including row_number\nconst item = $input.first().json;\n\n// We need to find the row to update\n// Pass through the row number from the trigger\nreturn [{\n  json: {\n    rowNumber: item.row_number || item['_rowNumber'] || 2,\n    notionPageId: $('Create Notion Recipe').first().json.id,\n    title: item.Title\n  }\n}];"
+      },
+      "id": "prepare-update",
+      "name": "Prepare Sheet Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 240]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Recipes"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Synced"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Title",
+              "lookupValue": "={{ $json.title }}"
+            }
+          ]
+        }
+      },
+      "id": "update-sheet-status",
+      "name": "Update Status to Synced",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1120, 240],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log error for monitoring\nconst error = $input.first().json;\nconsole.log('Notion sync error:', JSON.stringify(error));\n\nreturn [{\n  json: {\n    error: true,\n    message: `Failed to sync recipe to Notion: ${error.message || 'Unknown error'}`,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 440]
+    }
+  ],
+  "connections": {
+    "Google Sheets Trigger": {
+      "main": [
+        [
+          {
+            "node": "Filter New Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter New Rows": {
+      "main": [
+        [
+          {
+            "node": "Create Notion Recipe",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Create Notion Recipe": {
+      "main": [
+        [
+          {
+            "node": "Prepare Sheet Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Sheet Update": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Synced",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Recipe Management"
+    }
+  ],
+  "pinData": {},
+  "triggerCount": 1
+}

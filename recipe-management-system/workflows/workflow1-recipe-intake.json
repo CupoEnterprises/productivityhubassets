@@ -1,0 +1,327 @@
+{
+  "name": "Recipe Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recipe-intake",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "recipe-intake"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "condition-image",
+              "leftValue": "={{ $json.body.type }}",
+              "rightValue": "image",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "if-image-or-text",
+      "name": "Is Image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vision.googleapis.com/v1/images:annotate",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "={{ $env.GOOGLE_VISION_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"requests\": [\n    {\n      \"image\": {\n        \"content\": \"{{ $json.body.image.replace(/^data:image\\/[^;]+;base64,/, '') }}\"\n      },\n      \"features\": [\n        {\n          \"type\": \"TEXT_DETECTION\",\n          \"maxResults\": 1\n        }\n      ]\n    }\n  ]\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "google-vision-ocr",
+      "name": "Google Vision OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract OCR text from Google Vision response\nconst visionResponse = $input.first().json;\n\nlet ocrText = '';\ntry {\n  ocrText = visionResponse.responses[0].fullTextAnnotation.text;\n} catch (e) {\n  throw new Error('Google Vision OCR failed to extract text from image. The image may be unclear or not contain readable text.');\n}\n\nif (!ocrText || ocrText.trim().length < 10) {\n  throw new Error('OCR extracted very little text. Please try with a clearer image.');\n}\n\nreturn [{ json: { recipeText: ocrText, source: 'image' } }];"
+      },
+      "id": "extract-ocr-text",
+      "name": "Extract OCR Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass through text input directly\nconst body = $input.first().json.body;\nconst recipeText = body.text || '';\n\nif (!recipeText || recipeText.trim().length < 10) {\n  throw new Error('Recipe text is too short. Please provide more detail.');\n}\n\nreturn [{ json: { recipeText: recipeText, source: 'text' } }];"
+      },
+      "id": "extract-text-input",
+      "name": "Extract Text Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"max_tokens\": 4096,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Extract the recipe from the following text into JSON format with these exact fields:\\n\\n- title (string): The recipe name\\n- description (string): A brief description. If not provided in the text, generate a 1-2 sentence description based on the ingredients and cooking method.\\n- ingredients (array of strings): Each ingredient as a formatted string with quantity in imperial units (cups, tablespoons, teaspoons, ounces, pounds, etc.). Standardize measurements. Example: [\\\"2 lbs chicken breast\\\", \\\"1 cup flour\\\"]\\n- instructions (array of strings): Each step as a numbered instruction string. Example: [\\\"1. Preheat oven to 375°F.\\\", \\\"2. Season the chicken.\\\"]\\n\\nIMPORTANT:\\n- Convert all metric measurements to imperial\\n- Standardize ingredient formatting: quantity + unit + ingredient name\\n- If quantities are missing, note \\\"to taste\\\" or estimate reasonable amounts\\n- Return ONLY valid JSON, no markdown code fences or extra text\\n\\nRecipe text:\\n{{ $json.recipeText }}\"\n    }\n  ]\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "claude-parse-recipe",
+      "name": "Claude Parse Recipe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's response and format for Google Sheets\nconst claudeResponse = $input.first().json;\n\nlet recipeJson;\ntry {\n  // Extract text content from Claude API response\n  const content = claudeResponse.content[0].text;\n  \n  // Try to parse JSON - handle potential markdown code fences\n  let jsonStr = content.trim();\n  if (jsonStr.startsWith('```')) {\n    jsonStr = jsonStr.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '');\n  }\n  \n  recipeJson = JSON.parse(jsonStr);\n} catch (e) {\n  throw new Error(`Failed to parse Claude response as JSON: ${e.message}. Raw response: ${JSON.stringify(claudeResponse.content).substring(0, 500)}`);\n}\n\n// Validate required fields\nconst required = ['title', 'ingredients', 'instructions'];\nfor (const field of required) {\n  if (!recipeJson[field]) {\n    throw new Error(`Missing required field: ${field}`);\n  }\n}\n\n// Format for Google Sheets\nconst title = recipeJson.title || 'Untitled Recipe';\nconst description = recipeJson.description || '';\n\n// Format ingredients as newline-separated list\nconst ingredients = Array.isArray(recipeJson.ingredients)\n  ? recipeJson.ingredients.join('\\n')\n  : recipeJson.ingredients;\n\n// Format instructions as newline-separated list\nconst instructions = Array.isArray(recipeJson.instructions)\n  ? recipeJson.instructions.join('\\n')\n  : recipeJson.instructions;\n\nconst timestamp = new Date().toISOString();\n\nreturn [{\n  json: {\n    title,\n    description,\n    ingredients,\n    instructions,\n    timestamp,\n    status: 'New',\n    // Pass title back for webhook response\n    _responseTitle: title\n  }\n}];"
+      },
+      "id": "format-for-sheets",
+      "name": "Format for Sheets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Recipes"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Title": "={{ $json.title }}",
+            "Description": "={{ $json.description }}",
+            "Ingredients": "={{ $json.ingredients }}",
+            "Instructions": "={{ $json.instructions }}",
+            "Timestamp": "={{ $json.timestamp }}",
+            "Status": "={{ $json.status }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "google-sheets-append",
+      "name": "Append to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1580, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"title\": \"{{ $json.title }}\",\n  \"message\": \"Recipe '{{ $json.title }}' has been saved successfully.\"\n}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1800, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"error\": \"{{ $json.error.message || 'An unexpected error occurred while processing your recipe.' }}\"\n}",
+        "options": {
+          "responseCode": 500,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1800, 520]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Is Image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Image?": {
+      "main": [
+        [
+          {
+            "node": "Google Vision OCR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Text Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Vision OCR": {
+      "main": [
+        [
+          {
+            "node": "Extract OCR Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract OCR Text": {
+      "main": [
+        [
+          {
+            "node": "Claude Parse Recipe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text Input": {
+      "main": [
+        [
+          {
+            "node": "Claude Parse Recipe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Parse Recipe": {
+      "main": [
+        [
+          {
+            "node": "Format for Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format for Sheets": {
+      "main": [
+        [
+          {
+            "node": "Append to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Recipe Management"
+    }
+  ],
+  "pinData": {},
+  "triggerCount": 1
+}

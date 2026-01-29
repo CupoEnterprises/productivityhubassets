@@ -1,0 +1,168 @@
+{
+  "name": "Shopping List Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 2,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.NOTION_RECIPES_DB_ID }}"
+        },
+        "event": "updated",
+        "properties": ["In Weekly Meals"],
+        "options": {}
+      },
+      "id": "notion-trigger",
+      "name": "Notion Trigger - Weekly Meals Changed",
+      "type": "n8n-nodes-base.notionTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "notionApi": {
+          "id": "NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.NOTION_RECIPES_DB_ID }}"
+        },
+        "returnAll": true,
+        "filterType": "formula",
+        "filterJson": "{\n  \"property\": \"In Weekly Meals\",\n  \"checkbox\": {\n    \"equals\": true\n  }\n}",
+        "options": {}
+      },
+      "id": "fetch-weekly-recipes",
+      "name": "Fetch Weekly Meal Recipes",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [480, 300],
+      "credentials": {
+        "notionApi": {
+          "id": "NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Shopping List Generator\n// Combines ingredients, merges duplicates, categorizes by section\n// ============================================================\n\nconst items = $input.all();\n\nif (!items || items.length === 0) {\n  return [{\n    json: {\n      shoppingList: '# Weekly Shopping List\\n\\nNo meals selected for this week. Check the \"In Weekly Meals\" checkbox on recipes in Notion to build your list.',\n      recipeCount: 0,\n      timestamp: new Date().toISOString()\n    }\n  }];\n}\n\n// --- Category keyword mappings ---\nconst CATEGORIES = {\n  'Produce': [\n    'lettuce', 'tomato', 'onion', 'garlic', 'pepper', 'carrot', 'celery',\n    'potato', 'broccoli', 'spinach', 'kale', 'cucumber', 'zucchini',\n    'squash', 'mushroom', 'corn', 'bean sprout', 'cabbage', 'avocado',\n    'lemon', 'lime', 'orange', 'apple', 'banana', 'berry', 'blueberry',\n    'strawberry', 'raspberry', 'grape', 'mango', 'pineapple', 'peach',\n    'pear', 'melon', 'watermelon', 'cantaloupe', 'ginger', 'cilantro',\n    'parsley', 'basil', 'mint', 'rosemary', 'thyme', 'dill', 'chive',\n    'scallion', 'green onion', 'shallot', 'leek', 'asparagus',\n    'artichoke', 'beet', 'radish', 'turnip', 'sweet potato', 'yam',\n    'jalape', 'serrano', 'habanero', 'bell pepper', 'eggplant',\n    'cauliflower', 'brussels sprout', 'snap pea', 'snow pea',\n    'fresh herb', 'fresh'\n  ],\n  'Meat & Seafood': [\n    'chicken', 'beef', 'pork', 'steak', 'ground beef', 'ground turkey',\n    'turkey', 'lamb', 'veal', 'bacon', 'sausage', 'ham', 'prosciutto',\n    'salami', 'pepperoni', 'fish', 'salmon', 'tuna', 'shrimp', 'prawn',\n    'crab', 'lobster', 'scallop', 'clam', 'mussel', 'oyster', 'cod',\n    'tilapia', 'halibut', 'mahi', 'swordfish', 'anchov', 'sardine',\n    'brisket', 'ribs', 'tenderloin', 'sirloin', 'chuck', 'flank'\n  ],\n  'Dairy & Eggs': [\n    'milk', 'cheese', 'butter', 'cream', 'yogurt', 'egg', 'sour cream',\n    'cream cheese', 'mozzarella', 'cheddar', 'parmesan', 'feta',\n    'ricotta', 'gouda', 'swiss', 'provolone', 'brie', 'goat cheese',\n    'cottage cheese', 'half and half', 'whipping cream', 'heavy cream',\n    'buttermilk', 'ghee', 'margarine'\n  ],\n  'Pantry': [\n    'flour', 'sugar', 'salt', 'pepper', 'oil', 'olive oil', 'vegetable oil',\n    'canola oil', 'sesame oil', 'coconut oil', 'vinegar', 'soy sauce',\n    'worcestershire', 'hot sauce', 'ketchup', 'mustard', 'mayonnaise',\n    'rice', 'pasta', 'noodle', 'spaghetti', 'penne', 'macaroni',\n    'linguine', 'fettuccine', 'orzo', 'couscous', 'quinoa', 'oat',\n    'cereal', 'granola', 'canned', 'tomato sauce', 'tomato paste',\n    'diced tomato', 'crushed tomato', 'broth', 'stock', 'bouillon',\n    'bean', 'lentil', 'chickpea', 'black bean', 'kidney bean',\n    'pinto bean', 'baking soda', 'baking powder', 'yeast', 'cornstarch',\n    'cocoa', 'chocolate', 'vanilla', 'extract', 'honey', 'maple syrup',\n    'molasses', 'jam', 'jelly', 'peanut butter', 'almond butter',\n    'nut', 'walnut', 'almond', 'pecan', 'cashew', 'pistachio',\n    'breadcrumb', 'panko', 'crouton', 'raisin', 'dried', 'cinnamon',\n    'cumin', 'paprika', 'chili powder', 'oregano', 'turmeric',\n    'cayenne', 'nutmeg', 'clove', 'allspice', 'cardamom', 'coriander',\n    'fennel seed', 'bay leaf', 'red pepper flake', 'garlic powder',\n    'onion powder', 'italian seasoning', 'taco seasoning', 'curry',\n    'garam masala', 'five spice', 'spice'\n  ],\n  'Frozen': [\n    'frozen', 'ice cream', 'frozen vegetable', 'frozen fruit',\n    'frozen pizza', 'frozen dinner', 'popsicle', 'sorbet', 'gelato',\n    'frozen fries', 'frozen corn', 'frozen peas', 'frozen berries',\n    'frozen spinach', 'frozen shrimp'\n  ],\n  'Bakery': [\n    'bread', 'tortilla', 'pita', 'naan', 'baguette', 'roll', 'bun',\n    'croissant', 'muffin', 'bagel', 'english muffin', 'flatbread',\n    'wrap', 'ciabatta', 'sourdough', 'cornbread'\n  ]\n};\n\n// --- Unit normalization ---\nconst UNIT_MAP = {\n  'cup': 'cup', 'cups': 'cup', 'c': 'cup',\n  'tablespoon': 'tbsp', 'tablespoons': 'tbsp', 'tbsp': 'tbsp', 'tbs': 'tbsp', 'tb': 'tbsp',\n  'teaspoon': 'tsp', 'teaspoons': 'tsp', 'tsp': 'tsp', 'ts': 'tsp',\n  'ounce': 'oz', 'ounces': 'oz', 'oz': 'oz',\n  'pound': 'lb', 'pounds': 'lb', 'lb': 'lb', 'lbs': 'lb',\n  'gallon': 'gal', 'gallons': 'gal', 'gal': 'gal',\n  'quart': 'qt', 'quarts': 'qt', 'qt': 'qt',\n  'pint': 'pt', 'pints': 'pt', 'pt': 'pt',\n  'clove': 'clove', 'cloves': 'clove',\n  'slice': 'slice', 'slices': 'slice',\n  'piece': 'piece', 'pieces': 'piece',\n  'can': 'can', 'cans': 'can',\n  'jar': 'jar', 'jars': 'jar',\n  'bunch': 'bunch', 'bunches': 'bunch',\n  'head': 'head', 'heads': 'head',\n  'stalk': 'stalk', 'stalks': 'stalk',\n  'sprig': 'sprig', 'sprigs': 'sprig',\n  'pinch': 'pinch', 'pinches': 'pinch',\n  'dash': 'dash', 'dashes': 'dash',\n  'package': 'pkg', 'packages': 'pkg', 'pkg': 'pkg',\n  'bag': 'bag', 'bags': 'bag',\n  'bottle': 'bottle', 'bottles': 'bottle',\n  'stick': 'stick', 'sticks': 'stick',\n  'large': 'large', 'medium': 'medium', 'small': 'small',\n  'whole': 'whole'\n};\n\n// --- Parse a single ingredient line ---\nfunction parseIngredient(line) {\n  line = line.trim();\n  if (!line) return null;\n\n  // Remove bullet points, dashes, numbers with dots/parens at start\n  line = line.replace(/^[-•*]\\s*/, '').replace(/^\\d+[\\.\\)]\\s*/, '').trim();\n\n  // Match: quantity (with fractions) + optional unit + ingredient name\n  const regex = /^([\\d½⅓⅔¼¾⅛⅜⅝⅞/\\s.]+)?\\s*(cup|cups|tablespoon|tablespoons|tbsp|tbs|tb|teaspoon|teaspoons|tsp|ts|ounce|ounces|oz|pound|pounds|lbs?|gallon|gallons|gal|quart|quarts|qt|pint|pints|pt|cloves?|slices?|pieces?|cans?|jars?|bunch|bunches|heads?|stalks?|sprigs?|pinch|pinches|dash|dashes|packages?|pkg|bags?|bottles?|sticks?|large|medium|small|whole)\\.?\\s+(.+)$/i;\n\n  const match = line.match(regex);\n\n  if (match) {\n    let qty = parseQuantity(match[1]);\n    let unit = UNIT_MAP[(match[2] || '').toLowerCase()] || match[2] || '';\n    let name = match[3].toLowerCase().trim();\n    // Remove trailing prep instructions like ', diced' or '(optional)'\n    name = name.replace(/\\s*\\(.*\\)\\s*$/, '').replace(/,\\s*(diced|chopped|minced|sliced|crushed|grated|shredded|julienned|cubed|halved|quartered|trimmed|peeled|seeded|deveined|thawed|drained|rinsed|divided|packed|sifted|melted|softened|room temperature|to taste|or more|as needed|for garnish|for serving|optional).*$/i, '').trim();\n    return { qty, unit, name };\n  }\n\n  // Fallback: no recognized unit\n  const simpleMatch = line.match(/^([\\d½⅓⅔¼¾⅛⅜⅝⅞/\\s.]+)?\\s*(.+)$/i);\n  if (simpleMatch && simpleMatch[1]) {\n    let qty = parseQuantity(simpleMatch[1]);\n    let name = simpleMatch[2].toLowerCase().trim();\n    name = name.replace(/\\s*\\(.*\\)\\s*$/, '').trim();\n    return { qty, unit: '', name };\n  }\n\n  return { qty: 0, unit: '', name: line.toLowerCase() };\n}\n\n// --- Parse quantity string to number ---\nfunction parseQuantity(str) {\n  if (!str) return 1;\n  str = str.trim();\n\n  // Unicode fraction map\n  const fractions = { '½': 0.5, '⅓': 0.333, '⅔': 0.667, '¼': 0.25, '¾': 0.75, '⅛': 0.125, '⅜': 0.375, '⅝': 0.625, '⅞': 0.875 };\n\n  let total = 0;\n  // Replace unicode fractions\n  for (const [char, val] of Object.entries(fractions)) {\n    if (str.includes(char)) {\n      total += val;\n      str = str.replace(char, '').trim();\n    }\n  }\n\n  // Handle \"1/2\" style fractions\n  const fracMatch = str.match(/(\\d+)\\/(\\d+)/);\n  if (fracMatch) {\n    total += parseInt(fracMatch[1]) / parseInt(fracMatch[2]);\n    str = str.replace(fracMatch[0], '').trim();\n  }\n\n  // Handle remaining whole number\n  const numMatch = str.match(/([\\d.]+)/);\n  if (numMatch) {\n    total += parseFloat(numMatch[1]);\n  }\n\n  return total || 1;\n}\n\n// --- Categorize an ingredient ---\nfunction categorize(name) {\n  const lower = name.toLowerCase();\n  for (const [category, keywords] of Object.entries(CATEGORIES)) {\n    for (const keyword of keywords) {\n      if (lower.includes(keyword)) {\n        return category;\n      }\n    }\n  }\n  return 'Other';\n}\n\n// --- Format quantity for display ---\nfunction formatQty(num) {\n  if (num === 0) return '';\n  // Common fractions\n  const wholes = Math.floor(num);\n  const frac = num - wholes;\n  const fracMap = [\n    [0.125, '⅛'], [0.25, '¼'], [0.333, '⅓'], [0.375, '⅜'],\n    [0.5, '½'], [0.625, '⅝'], [0.667, '⅔'], [0.75, '¾'], [0.875, '⅞']\n  ];\n\n  let fracStr = '';\n  if (frac > 0.05) {\n    const closest = fracMap.reduce((a, b) =>\n      Math.abs(b[0] - frac) < Math.abs(a[0] - frac) ? b : a\n    );\n    if (Math.abs(closest[0] - frac) < 0.06) {\n      fracStr = closest[1];\n    } else {\n      return num % 1 === 0 ? num.toString() : num.toFixed(1);\n    }\n  }\n\n  if (wholes > 0 && fracStr) return `${wholes} ${fracStr}`;\n  if (wholes > 0) return wholes.toString();\n  return fracStr || num.toString();\n}\n\n// --- Pluralize unit ---\nfunction pluralizeUnit(unit, qty) {\n  if (qty <= 1 || !unit) return unit;\n  const plurals = {\n    'cup': 'cups', 'tbsp': 'tbsp', 'tsp': 'tsp', 'oz': 'oz',\n    'lb': 'lbs', 'gal': 'gal', 'qt': 'qt', 'pt': 'pt',\n    'clove': 'cloves', 'slice': 'slices', 'piece': 'pieces',\n    'can': 'cans', 'jar': 'jars', 'bunch': 'bunches',\n    'head': 'heads', 'stalk': 'stalks', 'sprig': 'sprigs',\n    'pinch': 'pinches', 'dash': 'dashes', 'pkg': 'pkgs',\n    'bag': 'bags', 'bottle': 'bottles', 'stick': 'sticks'\n  };\n  return plurals[unit] || unit;\n}\n\n// ============================================================\n// MAIN: Aggregate ingredients\n// ============================================================\n\n// Collect all ingredients from all recipes\nconst combined = {}; // key: \"unit|name\" -> { qty, unit, name, category }\nconst recipeNames = [];\n\nfor (const item of items) {\n  const props = item.json.properties || item.json;\n\n  // Get title\n  let title = '';\n  if (props.Title) {\n    if (props.Title.title) {\n      title = props.Title.title.map(t => t.plain_text).join('');\n    } else if (typeof props.Title === 'string') {\n      title = props.Title;\n    }\n  }\n  if (title) recipeNames.push(title);\n\n  // Get ingredients text\n  let ingredientsText = '';\n  if (props.Ingredients) {\n    if (props.Ingredients.rich_text) {\n      ingredientsText = props.Ingredients.rich_text.map(t => t.plain_text).join('');\n    } else if (typeof props.Ingredients === 'string') {\n      ingredientsText = props.Ingredients;\n    }\n  }\n\n  // Parse each ingredient line\n  const lines = ingredientsText.split('\\n').filter(l => l.trim());\n  for (const line of lines) {\n    const parsed = parseIngredient(line);\n    if (!parsed || !parsed.name) continue;\n\n    const key = `${parsed.unit}|${parsed.name}`;\n    if (combined[key]) {\n      combined[key].qty += parsed.qty;\n    } else {\n      combined[key] = {\n        qty: parsed.qty,\n        unit: parsed.unit,\n        name: parsed.name,\n        category: categorize(parsed.name)\n      };\n    }\n  }\n}\n\n// ============================================================\n// FORMAT: Group by category and build output\n// ============================================================\nconst byCategory = {};\nfor (const item of Object.values(combined)) {\n  if (!byCategory[item.category]) byCategory[item.category] = [];\n  byCategory[item.category].push(item);\n}\n\n// Sort categories in display order\nconst categoryOrder = ['Produce', 'Meat & Seafood', 'Dairy & Eggs', 'Pantry', 'Frozen', 'Bakery', 'Other'];\n\nlet output = `# Weekly Shopping List\\n`;\noutput += `Generated: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}\\n`;\noutput += `Recipes: ${recipeNames.join(', ')}\\n\\n`;\n\nfor (const cat of categoryOrder) {\n  if (!byCategory[cat] || byCategory[cat].length === 0) continue;\n  output += `## ${cat}\\n`;\n\n  // Sort items alphabetically within category\n  byCategory[cat].sort((a, b) => a.name.localeCompare(b.name));\n\n  for (const item of byCategory[cat]) {\n    const qtyStr = formatQty(item.qty);\n    const unitStr = item.unit ? ` ${pluralizeUnit(item.unit, item.qty)}` : '';\n    const nameCap = item.name.charAt(0).toUpperCase() + item.name.slice(1);\n    output += `- [ ] ${qtyStr}${unitStr} ${nameCap}\\n`;\n  }\n  output += '\\n';\n}\n\nreturn [{\n  json: {\n    shoppingList: output,\n    recipeCount: recipeNames.length,\n    recipeNames: recipeNames,\n    itemCount: Object.keys(combined).length,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "generate-shopping-list",
+      "name": "Generate Shopping List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "resource": "page",
+        "operation": "update",
+        "pageId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.NOTION_SHOPPING_LIST_PAGE_ID }}"
+        },
+        "content": {
+          "pageContent": "={{ $json.shoppingList }}"
+        },
+        "options": {}
+      },
+      "id": "update-shopping-list-page",
+      "name": "Update Shopping List Page",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [960, 300],
+      "credentials": {
+        "notionApi": {
+          "id": "NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log success\nconst input = $input.first().json;\nconsole.log(`Shopping list updated: ${input.recipeCount} recipes, ${input.itemCount} items`);\nreturn [$input.first()];"
+      },
+      "id": "log-success",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 300]
+    }
+  ],
+  "connections": {
+    "Notion Trigger - Weekly Meals Changed": {
+      "main": [
+        [
+          {
+            "node": "Fetch Weekly Meal Recipes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Weekly Meal Recipes": {
+      "main": [
+        [
+          {
+            "node": "Generate Shopping List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Shopping List": {
+      "main": [
+        [
+          {
+            "node": "Update Shopping List Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Shopping List Page": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Recipe Management"
+    }
+  ],
+  "pinData": {},
+  "triggerCount": 1
+}

@@ -1,0 +1,299 @@
+{
+  "name": "Recipe Notes Parser (v2 Framework)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 5,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.NOTION_RECIPES_DB_ID }}"
+        },
+        "event": "updated",
+        "properties": ["Cooking Notes"],
+        "options": {}
+      },
+      "id": "notion-notes-trigger",
+      "name": "Notion Trigger - Cooking Notes Changed",
+      "type": "n8n-nodes-base.notionTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "notionApi": {
+          "id": "NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the cooking notes and current recipe data\nconst page = $input.first().json;\nconst props = page.properties || page;\n\n// Get the cooking notes text\nlet cookingNotes = '';\nif (props['Cooking Notes']) {\n  if (props['Cooking Notes'].rich_text) {\n    cookingNotes = props['Cooking Notes'].rich_text.map(t => t.plain_text).join('');\n  } else if (typeof props['Cooking Notes'] === 'string') {\n    cookingNotes = props['Cooking Notes'];\n  }\n}\n\n// Get current ingredients\nlet currentIngredients = '';\nif (props['Ingredients']) {\n  if (props['Ingredients'].rich_text) {\n    currentIngredients = props['Ingredients'].rich_text.map(t => t.plain_text).join('');\n  } else if (typeof props['Ingredients'] === 'string') {\n    currentIngredients = props['Ingredients'];\n  }\n}\n\n// Get title\nlet title = '';\nif (props.Title) {\n  if (props.Title.title) {\n    title = props.Title.title.map(t => t.plain_text).join('');\n  } else if (typeof props.Title === 'string') {\n    title = props.Title;\n  }\n}\n\n// Get version history\nlet versionHistory = '';\nif (props['Version History']) {\n  if (props['Version History'].rich_text) {\n    versionHistory = props['Version History'].rich_text.map(t => t.plain_text).join('');\n  } else if (typeof props['Version History'] === 'string') {\n    versionHistory = props['Version History'];\n  }\n}\n\n// Get page ID for later update\nconst pageId = page.id;\n\nreturn [{\n  json: {\n    pageId,\n    title,\n    cookingNotes,\n    currentIngredients,\n    versionHistory,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "extract-note-data",
+      "name": "Extract Note Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "has-notes",
+              "leftValue": "={{ $json.cookingNotes }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "has-notes-check",
+      "name": "Has Notes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"max_tokens\": 2048,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze these cooking notes for a recipe and determine if any ingredient modifications are suggested.\\n\\nRecipe: {{ $json.title }}\\n\\nCurrent Ingredients:\\n{{ $json.currentIngredients }}\\n\\nCooking Notes:\\n{{ $json.cookingNotes }}\\n\\nRespond in JSON with these exact fields:\\n- hasModifications (boolean): true if notes suggest changing ingredients\\n- modifiedIngredients (string): the full updated ingredients list with changes applied, or empty string if no changes\\n- summary (string): brief summary of what changed, or 'No ingredient changes detected'\\n- confidence (string): 'high', 'medium', or 'low' for how confident you are the notes suggest ingredient changes\\n\\nOnly modify ingredients if the notes clearly indicate changes like 'use more X', 'reduce Y', 'substitute A for B', 'add Z next time', etc.\\n\\nReturn ONLY valid JSON.\"\n    }\n  ]\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "claude-parse-notes",
+      "name": "Claude Parse Notes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's response for note modifications\nconst claudeResponse = $input.first().json;\nconst prevData = $('Extract Note Data').first().json;\n\nlet parsed;\ntry {\n  const content = claudeResponse.content[0].text;\n  let jsonStr = content.trim();\n  if (jsonStr.startsWith('```')) {\n    jsonStr = jsonStr.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '');\n  }\n  parsed = JSON.parse(jsonStr);\n} catch (e) {\n  // If Claude's response can't be parsed, log and skip\n  return [{\n    json: {\n      ...prevData,\n      hasModifications: false,\n      summary: 'Could not parse AI response for notes',\n      modifiedIngredients: '',\n      confidence: 'low'\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    hasModifications: parsed.hasModifications || false,\n    modifiedIngredients: parsed.modifiedIngredients || '',\n    summary: parsed.summary || 'No changes detected',\n    confidence: parsed.confidence || 'low'\n  }\n}];"
+      },
+      "id": "process-claude-response",
+      "name": "Process Claude Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "check-modifications",
+              "leftValue": "={{ $json.hasModifications }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "check-confidence",
+              "leftValue": "={{ $json.confidence }}",
+              "rightValue": "low",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "should-update-ingredients",
+      "name": "Should Update Ingredients?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1380, 240]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": "={{ $json.pageId }}",
+        "properties": {
+          "property": [
+            {
+              "key": "Ingredients|rich_text",
+              "richText": "={{ $json.modifiedIngredients }}"
+            },
+            {
+              "key": "Version History|rich_text",
+              "richText": "={{ $json.versionHistory }}\\n\\n[{{ $json.timestamp }}] {{ $json.summary }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-notion-ingredients",
+      "name": "Update Ingredients in Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [1620, 160],
+      "credentials": {
+        "notionApi": {
+          "id": "NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": "={{ $json.pageId }}",
+        "properties": {
+          "property": [
+            {
+              "key": "Version History|rich_text",
+              "richText": "={{ $json.versionHistory }}\\n\\n[{{ $json.timestamp }}] Note added: {{ $json.summary }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-version-history-only",
+      "name": "Update Version History Only",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [1620, 360],
+      "credentials": {
+        "notionApi": {
+          "id": "NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Notion Trigger - Cooking Notes Changed": {
+      "main": [
+        [
+          {
+            "node": "Extract Note Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Note Data": {
+      "main": [
+        [
+          {
+            "node": "Has Notes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Notes?": {
+      "main": [
+        [
+          {
+            "node": "Claude Parse Notes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Claude Parse Notes": {
+      "main": [
+        [
+          {
+            "node": "Process Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Claude Response": {
+      "main": [
+        [
+          {
+            "node": "Should Update Ingredients?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Update Ingredients?": {
+      "main": [
+        [
+          {
+            "node": "Update Ingredients in Notion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Version History Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Recipe Management"
+    },
+    {
+      "name": "v2"
+    }
+  ],
+  "pinData": {},
+  "triggerCount": 1
+}

@@ -1,0 +1,41 @@
+{
+  "_comment": "Recipe Management System Configuration - Copy this file to config.json and fill in your values",
+
+  "n8n": {
+    "webhook_url": "https://your-n8n-instance.example.com/webhook/recipe-intake",
+    "_webhook_note": "This is the URL from Workflow 1's Webhook Trigger node. Found in the node settings after activating the workflow."
+  },
+
+  "google_cloud_vision": {
+    "api_key": "AIzaSy...",
+    "_note": "Google Cloud Vision API key. Get from: console.cloud.google.com > APIs & Services > Credentials"
+  },
+
+  "anthropic": {
+    "api_key": "sk-ant-api03-...",
+    "_note": "Anthropic API key. Get from: console.anthropic.com/settings/keys"
+  },
+
+  "google_sheets": {
+    "sheet_id": "1aBcDeFgHiJkLmNoPqRsTuVwXyZ",
+    "_sheet_id_note": "The long ID from your Google Sheet URL: docs.google.com/spreadsheets/d/{THIS_PART}/edit",
+    "sheet_name": "Recipes",
+    "oauth2_client_id": "123456789-abc.apps.googleusercontent.com",
+    "oauth2_client_secret": "GOCSPX-...",
+    "_oauth_note": "Set up OAuth2 in n8n's Google Sheets credential. See README for instructions."
+  },
+
+  "notion": {
+    "api_key": "ntn_...",
+    "_api_note": "Notion Internal Integration Token. Get from: notion.so/my-integrations",
+    "recipes_database_id": "abc123def456...",
+    "_db_id_note": "From the Recipes database URL: notion.so/{workspace}/{THIS_PART}?v=...",
+    "shopping_list_page_id": "abc123def456...",
+    "_page_id_note": "From the Weekly Shopping List page URL: notion.so/{THIS_PART}"
+  },
+
+  "web_interface": {
+    "password": "your-secure-password-here",
+    "_password_note": "Choose a password, then generate its SHA-256 hash using the browser console: generatePasswordHash('your-password')"
+  }
+}
