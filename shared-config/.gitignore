@@ -1,0 +1,28 @@
+# Secrets and credentials - NEVER commit these
+config.json
+*.secret
+*.key
+.env
+.env.*
+
+# API keys and tokens
+credentials.json
+token.json
+oauth-tokens.json
+
+# n8n credential exports (may contain secrets)
+*-credentials.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Node modules (if any helper scripts use npm)
+node_modules/

@@ -113,7 +113,7 @@ A mobile-friendly web app that captures recipes from photos or text, parses them
 4. Copy and save the key securely
 
 ### Step 3: Notion Setup
-Follow the detailed guide in [docs/notion-setup-guide.md](docs/notion-setup-guide.md):
+Follow the detailed guide in [docs/notion-setup-guide.md](docs/notion-setup-guide.md) (or from repo root: `recipe-system/docs/notion-setup-guide.md`):
 1. Create a Notion integration
 2. Create the Recipes database with all properties
 3. Create the Weekly Shopping List page
@@ -278,20 +278,21 @@ After shopping, uncheck all **"In Weekly Meals"** checkboxes to clear your list.
 ## File Structure
 
 ```
-recipe-management-system/
-├── index.html                              # Mobile web interface
-├── config.example.json                     # Configuration template
-├── README.md                               # This file
-├── workflows/
-│   ├── workflow1-recipe-intake.json        # Photo/text → parse → Sheets
-│   ├── workflow2-notion-recipe-sync.json   # Sheets → Notion sync
+recipe-system/
+├── web-interface/
+│   └── index.html                              # Mobile web interface
+├── n8n-workflows/
+│   ├── workflow1-recipe-intake.json            # Photo/text → parse → Sheets
+│   ├── workflow2-notion-recipe-sync.json       # Sheets → Notion sync
 │   ├── workflow3-shopping-list-generator.json  # Meal plan → shopping list
-│   └── workflow4-recipe-notes-parser.json  # Cooking notes → updates (v2)
+│   └── workflow4-recipe-notes-parser.json      # Cooking notes → updates (v2)
 ├── docs/
-│   ├── notion-setup-guide.md              # Notion workspace setup
-│   └── google-sheets-template.md          # Sheets template and OAuth setup
-└── scripts/
-    └── generate-password-hash.sh          # CLI password hash generator
+│   ├── notion-setup-guide.md                   # Notion workspace setup
+│   └── google-sheets-template.md               # Sheets template and OAuth setup
+├── scripts/
+│   └── generate-password-hash.sh               # CLI password hash generator
+├── config.example.json                         # Configuration template
+└── README.md                                   # This file
 ```
 
 ---
